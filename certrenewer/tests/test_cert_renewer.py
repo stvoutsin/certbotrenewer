@@ -1,6 +1,6 @@
 import paramiko
 import pytest
-from certrenewer import CertificateRenewer
+from ..certrenewer import CertificateRenewer
 import os
 import subprocess
 
