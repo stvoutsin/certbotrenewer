@@ -189,7 +189,7 @@ class CertificateRenewer:
 
 def main(args):
     # Define the log directory and log filename
-    log_directory = "logs"
+    log_directory = "/var/log/certbot/"
     log_filename = "app.log"
 
     # Initialize the custom logger with the log directory and log filename
