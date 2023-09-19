@@ -1,4 +1,3 @@
-import logging
 import paramiko
 import subprocess
 import os
@@ -6,6 +5,49 @@ from datetime import datetime
 
 
 __all__ = ["CertificateRenewer", "SSHConnection"]
+
+import logging
+
+
+class CustomLogger:
+    def __init__(self, log_dir, log_file):
+        # Create a logger
+        self.logger = logging.getLogger("custom_logger")
+        self.logger.setLevel(logging.DEBUG)
+        if not os.path.exists(log_dir):
+            os.makedirs(log_dir)
+
+        log_file = os.path.join(log_directory, log_filename)
+
+        # Create a file handler
+        file_handler = logging.FileHandler(log_file)
+        file_handler.setLevel(
+            logging.DEBUG
+        )  # You can adjust the log level for the file handler as needed
+        formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+        file_handler.setFormatter(formatter)
+        self.logger.addHandler(file_handler)
+
+        # Create a console handler
+        console_handler = logging.StreamHandler()
+        console_handler.setLevel(
+            logging.DEBUG
+        )  # You can adjust the log level for the console handler as needed
+        formatter = logging.Formatter("%(levelname)s - %(message)s")
+        console_handler.setFormatter(formatter)
+        self.logger.addHandler(console_handler)
+
+    def debug(self, message):
+        self.logger.debug(message)
+
+    def error(self, message):
+        self.logger.error(message)
+
+    def warning(self, message):
+        self.logger.warning(message)
+
+    def info(self, message):
+        self.logger.info(message)
 
 
 class SSHConnection:
@@ -46,6 +88,7 @@ class CertificateRenewer:
         backup_destination,
         remote_folder,
         tar_name,
+        logger,
     ):
         self.ssh = ssh_connection
         self.remote_host = remote_host
@@ -54,6 +97,7 @@ class CertificateRenewer:
         self.remote_folder = remote_folder
         self.tar_name = tar_name
         self.current_date = datetime.now().strftime("%Y%m%d")
+        self.logger = logger
 
     @property
     def tarball_path(self):
@@ -66,11 +110,12 @@ class CertificateRenewer:
         Returns:
             bool: True if certificate renewal was successful, False otherwise.
         """
+        stdout = ""
         try:
             _, stdout, _ = self.ssh.exec_command("sudo certbot renew --quiet")
             return b"No renewals were attempted" not in stdout
-        except Exception as e:
-            logging.error(f"Error during certificate renewal: {e}")
+        except Exception:
+            self.logger.error(f"Error during certificate renewal: {stdout}")
             return False
 
     def create_certificate_tarball(self):
@@ -86,7 +131,7 @@ class CertificateRenewer:
             )
             return self.tarball_path
         except Exception as e:
-            logging.error(f"Error during certificate tarball creation: {e}")
+            self.logger.error(f"Error during certificate tarball creation: {e}")
             return None
 
     def copy_certificate_to_data_node(self):
@@ -113,7 +158,7 @@ class CertificateRenewer:
             return True
 
         except Exception as e:
-            logging.error(f"Error during copying: {e}")
+            self.logger.error(f"Error during copying: {e}")
             return False
 
     def update_latest_symlink(self):
@@ -125,22 +170,31 @@ class CertificateRenewer:
             if os.path.islink(latest_symlink):
                 os.remove(latest_symlink)
             os.symlink(self.current_date, latest_symlink)
-            print(f"Updated 'latest' symlink to {self.current_date}")
+            self.logger.info(f"Updated 'latest' symlink to {self.current_date}")
         except Exception as e:
-            logging.error(f"Error updating 'latest' symlink: {e}")
+            self.logger.error(f"Error updating 'latest' symlink: {e}")
 
     def renew_and_copy_certificate(self):
         """
         Renew and Copy certificate from remote server
         """
+        self.logger.info("Starting Renewal & Backup")
         if self.renew_ssl_certificate():
             tarball_path = self.create_certificate_tarball()
             if tarball_path:
                 if self.copy_certificate_to_data_node():
                     self.update_latest_symlink()
+                    self.logger.info("Renewal completed successfully")
 
 
 if __name__ == "__main__":
+    # Define the log directory and log filename
+    log_directory = "logs"
+    log_filename = "app.log"
+
+    # Initialize the custom logger with the log directory and log filename
+    custom_logger = CustomLogger(log_directory, log_filename)
+
     # Define the remote server's details
     zeppelin_host = "iris-gaia-blue.gaia-dmp.uk"
     zeppelin_user = "fedora"
@@ -149,7 +203,6 @@ if __name__ == "__main__":
 
     # Define the local destination path on the data node
     data_backup_dest = "/tmp/certs/"
-
     with SSHConnection(zeppelin_host, zeppelin_user) as ssh:
         renewer = CertificateRenewer(
             ssh_connection=ssh,
@@ -158,5 +211,6 @@ if __name__ == "__main__":
             backup_destination=data_backup_dest,
             remote_folder=zeppelin_tmp_folder,
             tar_name=cert_tarname,
+            logger=custom_logger,
         )
         renewer.renew_and_copy_certificate()
