@@ -2,7 +2,7 @@ import paramiko
 import subprocess
 import os
 from datetime import datetime
-
+import argparse
 
 __all__ = ["CertificateRenewer", "SSHConnection"]
 
@@ -17,7 +17,7 @@ class CustomLogger:
         if not os.path.exists(log_dir):
             os.makedirs(log_dir)
 
-        log_file = os.path.join(log_directory, log_filename)
+        log_file = os.path.join(log_dir, log_file)
 
         # Create a file handler
         file_handler = logging.FileHandler(log_file)
@@ -187,7 +187,7 @@ class CertificateRenewer:
                     self.logger.info("Renewal completed successfully")
 
 
-if __name__ == "__main__":
+def main(args):
     # Define the log directory and log filename
     log_directory = "logs"
     log_filename = "app.log"
@@ -195,14 +195,16 @@ if __name__ == "__main__":
     # Initialize the custom logger with the log directory and log filename
     custom_logger = CustomLogger(log_directory, log_filename)
 
-    # Define the remote server's details
-    zeppelin_host = "iris-gaia-blue.gaia-dmp.uk"
-    zeppelin_user = "fedora"
-    cert_tarname = "certs.tar.gz"
+    zeppelin_host = args.zeppelin_host
+    zeppelin_user = args.zeppelin_user
+    data_backup_dest = args.data_backup_dest
+
+    # Define certs name
     zeppelin_tmp_folder = "/tmp"
+    cert_tarname = "certs.tar.gz"
 
     # Define the local destination path on the data node
-    data_backup_dest = "/tmp/certs/"
+
     with SSHConnection(zeppelin_host, zeppelin_user) as ssh:
         renewer = CertificateRenewer(
             ssh_connection=ssh,
@@ -214,3 +216,26 @@ if __name__ == "__main__":
             logger=custom_logger,
         )
         renewer.renew_and_copy_certificate()
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(
+        description="Renew and copy SSL certificates on a remote server."
+    )
+    parser.add_argument(
+        "--zeppelin-host",
+        required=True,
+        help="Hostname or IP address of the remote server.",
+    )
+    parser.add_argument(
+        "--zeppelin-user",
+        required=True,
+        help="Username for SSH connection to the remote server.",
+    )
+    parser.add_argument(
+        "--data-backup-dest",
+        required=True,
+        help="Destination path on the data node.",
+    )
+    arguments = parser.parse_args()
+    main(arguments)
