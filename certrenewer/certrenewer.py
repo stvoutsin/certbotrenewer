@@ -88,7 +88,7 @@ class CertificateRenewer:
         backup_destination,
         remote_folder,
         tar_name,
-        logger,
+        logger = logging.getLogger(__name__),
     ):
         self.ssh = ssh_connection
         self.remote_host = remote_host
