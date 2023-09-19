@@ -5,29 +5,32 @@ import os
 from datetime import datetime
 
 
+__all__ = ["CertificateRenewer", "SSHConnection"]
+
+
 class SSHConnection:
     """
     SSH Context manager
     """
 
-    def __init__(self, remote_host, remote_user):
-        self.remote_host = remote_host
-        self.remote_user = remote_user
-        self.ssh = None
+    def __init__(self, host, user):
+        self.host = host
+        self.user = user
+        self.ssh_connection = None
 
     def __enter__(self):
-        self.ssh = self._ssh_connect()
-        return self.ssh
+        self.ssh_connection = self._ssh_connect()
+        return self.ssh_connection
 
     def __exit__(self, exc_type, exc_value, traceback):
-        if self.ssh:
-            self.ssh.close()
+        if self.ssh_connection:
+            self.ssh_connection.close()
 
     def _ssh_connect(self):
-        ssh = paramiko.SSHClient()
-        ssh.load_system_host_keys()
-        ssh.connect(self.remote_host, username=self.remote_user)
-        return ssh
+        ssh_connection = paramiko.SSHClient()
+        ssh_connection.load_system_host_keys()
+        ssh_connection.connect(self.host, username=self.user)
+        return ssh_connection
 
 
 class CertificateRenewer:
@@ -35,12 +38,26 @@ class CertificateRenewer:
     Handles renewing a certificate via ssh connection and certbot
     """
 
-    def __init__(self, ssh, remote_user, remote_host, local_destination):
-        self.ssh = ssh
+    def __init__(
+        self,
+        ssh_connection,
+        remote_user,
+        remote_host,
+        backup_destination,
+        remote_folder,
+        tar_name,
+    ):
+        self.ssh = ssh_connection
         self.remote_host = remote_host
         self.remote_user = remote_user
-        self.local_destination = local_destination
+        self.backup_destination = backup_destination
+        self.remote_folder = remote_folder
+        self.tar_name = tar_name
         self.current_date = datetime.now().strftime("%Y%m%d")
+
+    @property
+    def tarball_path(self):
+        return f"{self.remote_folder}/{self.tar_name}"
 
     def renew_ssl_certificate(self):
         """
@@ -51,7 +68,7 @@ class CertificateRenewer:
         """
         try:
             _, stdout, _ = self.ssh.exec_command("sudo certbot renew --quiet")
-            return not b"No renewals were attempted" in stdout.read()
+            return b"No renewals were attempted" not in stdout
         except Exception as e:
             logging.error(f"Error during certificate renewal: {e}")
             return False
@@ -64,9 +81,10 @@ class CertificateRenewer:
             str: The path to the created tarball, or None on failure.
         """
         try:
-            tarball_path = f"/tmp/certs.tar.gz"
-            self.ssh.exec_command(f"tar czf {tarball_path} -C /etc/letsencrypt .")
-            return tarball_path
+            self.ssh.exec_command(
+                f"sudo tar -cvzf {self.tarball_path} -C /etc/ letsencrypt"
+            )
+            return self.tarball_path
         except Exception as e:
             logging.error(f"Error during certificate tarball creation: {e}")
             return None
@@ -79,7 +97,7 @@ class CertificateRenewer:
             bool: True if the copy operation was successful, False otherwise.
         """
         try:
-            target_directory = os.path.join(self.local_destination, self.current_date)
+            target_directory = os.path.join(self.backup_destination, self.current_date)
             os.makedirs(target_directory, exist_ok=True)
             target_path = os.path.join(
                 target_directory, os.path.basename(self.tarball_path)
@@ -91,7 +109,9 @@ class CertificateRenewer:
                     target_path,
                 ]
             )
+
             return True
+
         except Exception as e:
             logging.error(f"Error during copying: {e}")
             return False
@@ -101,7 +121,7 @@ class CertificateRenewer:
         Update the "latest" symlink to point to the new directory.
         """
         try:
-            latest_symlink = os.path.join(self.local_destination, "latest")
+            latest_symlink = os.path.join(self.backup_destination, "latest")
             if os.path.islink(latest_symlink):
                 os.remove(latest_symlink)
             os.symlink(self.current_date, latest_symlink)
@@ -109,29 +129,34 @@ class CertificateRenewer:
         except Exception as e:
             logging.error(f"Error updating 'latest' symlink: {e}")
 
-    def close_ssh_connection(self):
-        """
-        Close the SSH connection.
-        """
-        self.ssh.close()
-
     def renew_and_copy_certificate(self):
+        """
+        Renew and Copy certificate from remote server
+        """
         if self.renew_ssl_certificate():
-            self.tarball_path = self.create_certificate_tarball()
-            if self.tarball_path:
+            tarball_path = self.create_certificate_tarball()
+            if tarball_path:
                 if self.copy_certificate_to_data_node():
                     self.update_latest_symlink()
 
 
 if __name__ == "__main__":
     # Define the remote server's details
-    remote_host = "iris-gaia-blue.gaia-dmp.uk"
-    remote_user = "fedora"
+    zeppelin_host = "iris-gaia-blue.gaia-dmp.uk"
+    zeppelin_user = "fedora"
+    cert_tarname = "certs.tar.gz"
+    zeppelin_tmp_folder = "/tmp"
 
     # Define the local destination path on the data node
-    local_destination = "/home/fedora/certs/"
+    data_backup_dest = "/tmp/certs/"
 
-    with SSHConnection(remote_host, remote_user) as ssh:
-        renewer = CertificateRenewer(ssh, remote_user, remote_host, local_destination)
+    with SSHConnection(zeppelin_host, zeppelin_user) as ssh:
+        renewer = CertificateRenewer(
+            ssh_connection=ssh,
+            remote_user=zeppelin_user,
+            remote_host=zeppelin_host,
+            backup_destination=data_backup_dest,
+            remote_folder=zeppelin_tmp_folder,
+            tar_name=cert_tarname,
+        )
         renewer.renew_and_copy_certificate()
-
