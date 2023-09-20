@@ -70,7 +70,7 @@ class SSHConnection:
 
     def _ssh_connect(self):
         ssh_connection = paramiko.SSHClient()
-        ssh_connection.load_system_host_keys()
+        ssh_connection.set_missing_host_key_policy(paramiko.AutoAddPolicy())
         ssh_connection.connect(self.host, username=self.user)
         return ssh_connection
 
