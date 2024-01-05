@@ -1,4 +1,4 @@
-# Certificate Renewal and Copy Script
+# Certificate Renewal Script
 
 Renew certificate via certbot and copy it to backup node
 
